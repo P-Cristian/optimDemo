@@ -5,19 +5,34 @@ class InfiniteCanvas {
       height: window.innerHeight,
       backgroundColor: 0xeeeeee,
     });
-    
+    this.gameOfLifeMatrix = null;
     document.body.appendChild(this.app.view);
 
     this.cellSize = cellSize;
     this.scale = 1;
     this.offsetX = 0;
     this.offsetY = 0;
-    this.touchMode = "single";
-    this.prevTouch = [null, null];
+    this.cellGraphics = [];
 
-    this.setupEvents();
+
+    this.socket = new WebSocket('ws://localhost:3000');
+
+  
+    this.socket.addEventListener('message', (event) => {
+      const data = JSON.parse(event.data);
+      this.setGameOfLifeMatrix(data.matrix);
+    });
+
+  
+    this.socket.addEventListener('open', () => {
+      this.setupEvents();
+    });
 
     this.draw();
+  }
+  setGameOfLifeMatrix(matrix) {
+    this.gameOfLifeMatrix = matrix;
+    this.draw();  
   }
 
   toVirtualX(xReal) {
@@ -71,15 +86,41 @@ class InfiniteCanvas {
 
   draw() {
     this.drawGrid();
+    this.drawGameOfLifeCells();
+    this.socket.send(JSON.stringify({ message: 'DrawingFinished' }));
   }
+  drawGameOfLifeCells() {
+    const baseCellSize = 64; 
+
+   
+    const cellSize = baseCellSize * this.scale;
+
+   
+    this.cellGraphics.forEach(graphics => this.app.stage.removeChild(graphics));
+    this.cellGraphics = [];
+
+    if (this.gameOfLifeMatrix) {
+        for (let row = 0; row < this.gameOfLifeMatrix.length; row++) {
+            for (let col = 0; col < this.gameOfLifeMatrix[row].length; col++) {
+                if (this.gameOfLifeMatrix[row][col] === 1) {
+                    const sprite = new PIXI.Sprite.from("cell.jpeg"); 
+                    sprite.width = cellSize;
+                    sprite.height = cellSize;
+                    sprite.x = this.toVirtualX(col * cellSize);
+                    sprite.y = this.toVirtualY(row * cellSize);
+                    this.app.stage.addChild(sprite);
+                    this.cellGraphics.push(sprite);
+                }
+            }
+        }
+    }
+}
+  
+  
+
+
 
   setupEvents() {
-    this.app.view.addEventListener("touchstart", (event) =>
-      this.onTouchStart(event.touches)
-    );
-    this.app.view.addEventListener("touchmove", (event) =>
-      this.onTouchMove(event.touches)
-    );
     window.addEventListener("resize", () => this.draw());
     const buttons = {
       right: document.getElementById('right'),
@@ -93,11 +134,59 @@ class InfiniteCanvas {
     Object.values(buttons).forEach(button => {
       button.addEventListener('click', (event) => this.handleButtonClick(event));
     });
+    
+    this.app.view.addEventListener("wheel", (event) => this.handleZoom(event));
+    this.socket.addEventListener('message', (event) => {
+      const data = JSON.parse(event.data);
+
+     
+      if (data.message === 'DrawingFinished') {
+       
+        this.socket.send(JSON.stringify({ requestNextMatrix: true }));
+      } else {
+       
+        this.setGameOfLifeMatrix(data.matrix);
+      }
+    });
   }
+  handleZoom(event) {
+    const zoomSpeed = 0.1; 
+    const delta = event.deltaY > 0 ? 1 : -1; 
+
+   
+    const preZoomCursorX = event.clientX;
+    const preZoomCursorY = event.clientY;
+
+    
+    const preZoomVirtualX = this.toVirtualX(preZoomCursorX);
+    const preZoomVirtualY = this.toVirtualY(preZoomCursorY);
+
+    
+    const zoomFactor = delta === 1 ? 1 - zoomSpeed : 1 + zoomSpeed;
+
+    
+    this.zoom(zoomFactor);
+
+    
+    const postZoomCursorX = event.clientX;
+    const postZoomCursorY = event.clientY;
+
+   
+    const postZoomVirtualX = this.toVirtualX(postZoomCursorX);
+    const postZoomVirtualY = this.toVirtualY(postZoomCursorY);
+
+   
+    this.offsetX += postZoomVirtualX - preZoomVirtualX;
+    this.offsetY += postZoomVirtualY - preZoomVirtualY;
+
+    event.preventDefault(); 
+}
+
+  
 
   handleButtonClick(event) {
     const { id } = event.target;
-    const speed = 10; // Adjust the speed as needed
+    const speed = 10;
 
     switch (id) {
       case 'right':
@@ -129,35 +218,26 @@ class InfiniteCanvas {
   
 
   drawGrid() {
-    const graphics = new PIXI.Graphics();
-    graphics.lineStyle(1, 0xA9A9A9);
-
-    const width = this.app.renderer.screen.width;
-    const height = this.app.renderer.screen.height;
-
-    for (
-      let x = (this.offsetX % this.cellSize) * this.scale;
-      x <= width;
-      x += this.cellSize * this.scale
-    ) {
-      graphics.moveTo(x, 0);
-      graphics.lineTo(x, height);
-    }
-
-    for (
-      let y = (this.offsetY % this.cellSize) * this.scale;
-      y <= height;
-      y += this.cellSize * this.scale
-    ) {
-      graphics.moveTo(0, y);
-      graphics.lineTo(width, y);
-    }
-
+  
     this.app.stage.removeChildren();
-    this.app.stage.addChild(graphics);
+  
+ 
+    const texture = PIXI.Texture.from("texture.jpeg"); 
+    const tilingSprite = new PIXI.TilingSprite(texture, this.app.renderer.screen.width, this.app.renderer.screen.height);
+  
+  
+    tilingSprite.tilePosition.x = -this.offsetX * this.scale;
+    tilingSprite.tilePosition.y = -this.offsetY * this.scale;
+  
+ 
+    tilingSprite.tileScale.x = this.scale;
+    tilingSprite.tileScale.y = this.scale;
+  
+  
+    this.app.stage.addChild(tilingSprite);
   }
 }
 
-// Usage example:
+
 const infiniteCanvas = new InfiniteCanvas();
-infiniteCanvas.draw();  
+ 
